@@ -4,38 +4,34 @@
 
 package akka.persistence.journal.chaos
 
-import scala.collection.immutable
-import scala.concurrent.Future
 import java.util.concurrent.ThreadLocalRandom
+
 import akka.persistence._
 import akka.persistence.journal.AsyncWriteJournal
 import akka.persistence.journal.inmem.InmemMessages
+
+import scala.collection.immutable
+import scala.concurrent.Future
 import scala.util.Try
 import scala.util.control.NonFatal
 
-class WriteFailedException(ps: Seq[PersistentRepr])
-  extends TestException(s"write failed for payloads = [${ps.map(_.payload)}]")
-
-class ReplayFailedException(ps: Seq[PersistentRepr])
-  extends TestException(s"recovery failed after replaying payloads = [${ps.map(_.payload)}]")
-
-class ReadHighestFailedException
-  extends TestException(s"recovery failed when reading highest sequence number")
-
 /**
- * Keep [[ChaosJournal]] state in an external singleton so that it survives journal restarts.
- * The journal itself uses a dedicated dispatcher, so there won't be any visibility issues.
+ * INTERNAL API.
+ *
+ * Chaos journal for reliability testing purposes only.
  */
-private object ChaosJournalMessages extends InmemMessages
-
-class ChaosJournal extends AsyncWriteJournal {
-  import ChaosJournalMessages.{ delete ⇒ del, _ }
+private class ChaosJournal extends AsyncWriteJournal {
 
   val config = context.system.settings.config.getConfig("akka.persistence.journal.chaos")
   val writeFailureRate = config.getDouble("write-failure-rate")
   val deleteFailureRate = config.getDouble("delete-failure-rate")
   val replayFailureRate = config.getDouble("replay-failure-rate")
   val readHighestFailureRate = config.getDouble("read-highest-failure-rate")
+  val surviveRestarts = config.getBoolean("survive-restarts")
+
+  val messages = if (surviveRestarts) ChaosJournalMessages else new InmemMessages() {}
+
+  import messages.{ delete ⇒ del, _ }
 
   def random = ThreadLocalRandom.current
 
@@ -79,3 +75,18 @@ class ChaosJournal extends AsyncWriteJournal {
   def shouldFail(rate: Double): Boolean =
     random.nextDouble() < rate
 }
+
+private class WriteFailedException(ps: Seq[PersistentRepr])
+  extends Exception(s"write failed for payloads = [${ps.map(_.payload)}]")
+
+private class ReplayFailedException(ps: Seq[PersistentRepr])
+  extends Exception(s"recovery failed after replaying payloads = [${ps.map(_.payload)}]")
+
+private class ReadHighestFailedException
+  extends Exception(s"recovery failed when reading highest sequence number")
+
+/**
+ * Keep [[ChaosJournal]] state in an external singleton so that it survives journal restarts.
+ * The journal itself uses a dedicated dispatcher, so there won't be any visibility issues.
+ */
+private object ChaosJournalMessages extends InmemMessages
